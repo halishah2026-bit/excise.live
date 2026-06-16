@@ -31,14 +31,20 @@ const connectDB = async () => {
     const User = require('./models/User');
     const admin = await User.findOne({ role: 'superadmin' });
     if (!admin) {
+      const bootstrapEmail = process.env.SUPERADMIN_EMAIL?.trim().toLowerCase();
+      const bootstrapPassword = process.env.SUPERADMIN_PASSWORD;
+      if (!bootstrapEmail || !bootstrapPassword) {
+        console.warn('No superadmin exists. Set SUPERADMIN_EMAIL and SUPERADMIN_PASSWORD in the environment to bootstrap one.');
+        return;
+      }
       await User.create({
-        name: 'Super Admin',
-        email: 'admin@excise.live',
-        password: 'Admin@123',
+        name: process.env.SUPERADMIN_NAME?.trim() || 'Super Admin',
+        email: bootstrapEmail,
+        password: bootstrapPassword,
         role: 'superadmin',
-        phone: '03001234567',
+        phone: process.env.SUPERADMIN_PHONE?.trim() || undefined,
       });
-      console.log('Default superadmin created: admin@excise.live / Admin@123');
+      console.log('Initial superadmin account created from environment configuration.');
     }
   } catch (err) {
     console.error('MongoDB connection error:', err);

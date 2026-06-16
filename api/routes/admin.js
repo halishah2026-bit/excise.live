@@ -8,15 +8,54 @@ const { protect, adminOnly } = require('../middleware/auth');
 
 router.use(protect, adminOnly);
 
+const isSuperAdmin = (user) => user?.role === 'superadmin';
+
+const visibleUserScope = (user) => {
+  if (isSuperAdmin(user)) return {};
+  return { role: 'user', createdBy: user._id };
+};
+
+const ownUserIdsForAdmin = async (user) => {
+  if (isSuperAdmin(user)) return null;
+  return User.find(visibleUserScope(user)).distinct('_id');
+};
+
+const canManageUser = (actor, targetUser) => {
+  if (!targetUser) return false;
+  if (isSuperAdmin(actor)) return true;
+  return targetUser.role === 'user' && String(targetUser.createdBy || '') === String(actor._id);
+};
+
+const sanitizeUserUpdate = (body, actor, targetUser) => {
+  const { password, createdBy, searchCount, lastLogin, _id, ...updateData } = body;
+  if (!isSuperAdmin(actor)) {
+    delete updateData.role;
+    return updateData;
+  }
+
+  if (updateData.role) {
+    if (targetUser.role === 'superadmin' && updateData.role !== 'superadmin') {
+      throw new Error('Super Admin role cannot be changed');
+    }
+    if (targetUser.role !== 'superadmin' && !['user', 'admin'].includes(updateData.role)) {
+      throw new Error('Super Admin role cannot be assigned from portal');
+    }
+  }
+  return updateData;
+};
+
 // Dashboard Stats
 router.get('/stats', async (req, res) => {
   try {
+    const userScope = visibleUserScope(req.user);
+    const ownUserIds = await ownUserIdsForAdmin(req.user);
+    const logScope = ownUserIds ? { userId: { $in: ownUserIds } } : {};
     const [totalUsers, activeUsers, totalVehicles, totalSearches, recentLogs] = await Promise.all([
-      User.countDocuments({ role: 'user' }),
-      User.countDocuments({ role: 'user', isActive: true }),
+      User.countDocuments({ ...userScope, role: 'user' }),
+      User.countDocuments({ ...userScope, role: 'user', isActive: true }),
       VehicleRecord.countDocuments(),
-      SearchLog.countDocuments(),
-      SearchLog.find().sort({ createdAt: -1 }).limit(10).populate('userId', 'name email'),
+      SearchLog.countDocuments(logScope),
+      SearchLog.find(logScope).sort({ createdAt: -1 }).limit(10).populate('userId', 'name email'),
     ]);
 
     const [notificationsTotal, unreadNotifications] = await Promise.all([
@@ -25,6 +64,7 @@ router.get('/stats', async (req, res) => {
     ]);
 
     const serviceStats = await SearchLog.aggregate([
+      ...(Object.keys(logScope).length ? [{ $match: logScope }] : []),
       { $group: { _id: '$service', count: { $sum: 1 } } },
       { $sort: { count: -1 } }
     ]);
@@ -54,12 +94,9 @@ router.get('/users', async (req, res) => {
     const query = search
       ? { $or: [{ name: { $regex: search, $options: 'i' } }, { email: { $regex: search, $options: 'i' } }] }
       : {};
+    Object.assign(query, visibleUserScope(req.user));
 
-    if (req.user.role !== 'superadmin') {
-      query.role = { $ne: 'superadmin' };
-    }
-
-    const users = await User.find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(Number(limit));
+    const users = await User.find(query).select('-password').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(Number(limit));
     const total = await User.countDocuments(query);
     res.json({ success: true, users, total, pages: Math.ceil(total / limit) });
   } catch (err) {
@@ -69,10 +106,13 @@ router.get('/users', async (req, res) => {
 
 router.post('/users', async (req, res) => {
   try {
-    if (req.user.role !== 'superadmin' && req.body.role && req.body.role !== 'user') {
+    if (req.body.role === 'superadmin') {
+      return res.status(403).json({ success: false, message: 'Super Admin cannot be created from portal' });
+    }
+    if (!isSuperAdmin(req.user) && req.body.role && req.body.role !== 'user') {
       return res.status(403).json({ success: false, message: 'Only Super Admin can create admin users' });
     }
-    const role = req.body.role && req.user.role === 'superadmin' ? req.body.role : 'user';
+    const role = isSuperAdmin(req.user) && ['user', 'admin'].includes(req.body.role) ? req.body.role : 'user';
     const payload = { ...req.body, role, createdBy: req.user._id };
     const user = await User.create(payload);
     const sanitized = await User.findById(user._id).select('-password');
@@ -84,35 +124,23 @@ router.post('/users', async (req, res) => {
 
 router.put('/users/:id', async (req, res) => {
   try {
-    const { password, ...updateData } = req.body;
     const existingUser = await User.findById(req.params.id);
     if (!existingUser) return res.status(404).json({ success: false, message: 'User not found' });
 
-    if (existingUser.role === 'superadmin' && req.user.role !== 'superadmin') {
-      return res.status(403).json({ success: false, message: 'Cannot modify Super Admin' });
+    if (!canManageUser(req.user, existingUser)) {
+      return res.status(403).json({ success: false, message: 'You can only manage users assigned to you' });
     }
 
-    if (req.user.role !== 'superadmin' && updateData.role && updateData.role !== existingUser.role) {
-      return res.status(403).json({ success: false, message: 'Only Super Admin can update roles' });
+    const updateData = sanitizeUserUpdate(req.body, req.user, existingUser);
+
+    if (existingUser.role === 'superadmin' && updateData.isActive === false) {
+      return res.status(400).json({ success: false, message: 'Super Admin cannot be deactivated' });
     }
 
-    if (existingUser.role === 'admin') {
-      if (updateData.isActive === false) {
-        return res.status(400).json({ success: false, message: 'Admin account cannot be deactivated' });
-      }
-      if (updateData.role && updateData.role !== 'admin') {
-        return res.status(400).json({ success: false, message: 'Admin role cannot be changed' });
-      }
-    }
-
-    if (existingUser.role === 'superadmin' && updateData.role && updateData.role !== 'superadmin') {
-      return res.status(400).json({ success: false, message: 'Super Admin role cannot be changed' });
-    }
-
-    const user = await User.findByIdAndUpdate(req.params.id, updateData, { new: true });
+    const user = await User.findByIdAndUpdate(req.params.id, updateData, { new: true, runValidators: true }).select('-password');
     res.json({ success: true, user });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(400).json({ success: false, message: err.message });
   }
 });
 
@@ -120,8 +148,11 @@ router.delete('/users/:id', async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    if (user.role === 'admin' || user.role === 'superadmin') {
-      return res.status(400).json({ success: false, message: 'Admin account cannot be deleted' });
+    if (!canManageUser(req.user, user)) {
+      return res.status(403).json({ success: false, message: 'You can only delete users assigned to you' });
+    }
+    if (String(user._id) === String(req.user._id) || user.role === 'superadmin') {
+      return res.status(400).json({ success: false, message: 'This account cannot be deleted' });
     }
 
     await User.findByIdAndDelete(req.params.id);
@@ -136,17 +167,17 @@ router.patch('/users/:id/toggle', async (req, res) => {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
-    if ((user.role === 'admin' || user.role === 'superadmin') && user.isActive) {
-      return res.status(400).json({ success: false, message: 'Admin account cannot be deactivated' });
+    if (!canManageUser(req.user, user)) {
+      return res.status(403).json({ success: false, message: 'You can only manage users assigned to you' });
     }
-
-    if (user.role === 'superadmin' && req.user.role !== 'superadmin') {
-      return res.status(403).json({ success: false, message: 'Cannot modify Super Admin' });
+    if (String(user._id) === String(req.user._id) || user.role === 'superadmin') {
+      return res.status(400).json({ success: false, message: 'This account cannot be deactivated' });
     }
 
     user.isActive = !user.isActive;
     await user.save({ validateBeforeSave: false });
-    res.json({ success: true, user });
+    const sanitized = await User.findById(user._id).select('-password');
+    res.json({ success: true, user: sanitized });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -203,6 +234,8 @@ router.get('/logs', async (req, res) => {
   try {
     const { page = 1, limit = 50, service = '' } = req.query;
     const query = service ? { service } : {};
+    const ownUserIds = await ownUserIdsForAdmin(req.user);
+    if (ownUserIds) query.userId = { $in: ownUserIds };
     const logs = await SearchLog.find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(Number(limit)).populate('userId', 'name email');
     const total = await SearchLog.countDocuments(query);
     res.json({ success: true, logs, total, pages: Math.ceil(total / limit) });

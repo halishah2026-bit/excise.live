@@ -2,12 +2,15 @@
 import { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import API from '@/lib/api';
+import { getUser } from '@/lib/auth';
 
 interface User { _id: string; name: string; email: string; role: string; phone: string; cnic: string; isActive: boolean; searchCount: number; createdAt: string; lastLogin: string; }
 
 const emptyForm = { name: '', email: '', password: '', phone: '', cnic: '', role: 'user' };
 
 export default function AdminUsers() {
+  const currentUser = getUser();
+  const canManageAdmins = currentUser?.role === 'superadmin';
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -21,7 +24,7 @@ export default function AdminUsers() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const { data } = await API.get(`/admin/users?page=${page}&limit=15&search=${search}`);
+      const { data } = await API.get(`/admin/users?page=${page}&limit=15&search=${encodeURIComponent(search)}`);
       setUsers(data.users); setTotalPages(data.pages);
     } catch {} finally { setLoading(false); }
   };
@@ -34,11 +37,13 @@ export default function AdminUsers() {
   const handleSave = async () => {
     setSaving(true);
     try {
+      const payload = canManageAdmins ? form : { ...form, role: 'user' };
       if (editUser) {
-        const { password, ...data } = form;
-        await API.put(`/admin/users/${editUser._id}`, data);
+        const { password, ...data } = payload;
+        const { role, ...adminScopedData } = data;
+        await API.put(`/admin/users/${editUser._id}`, canManageAdmins ? data : adminScopedData);
       } else {
-        await API.post('/admin/users', form);
+        await API.post('/admin/users', payload);
       }
       setShowModal(false); fetchUsers();
     } catch (err: any) {
@@ -58,7 +63,7 @@ export default function AdminUsers() {
   };
 
   return (
-    <DashboardLayout title="User Management" subtitle="Manage all system users" adminOnly>
+    <DashboardLayout title="User Management" subtitle={canManageAdmins ? "Manage all system users" : "Manage users assigned to your admin account"} adminOnly>
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         {/* Header */}
         <div className="px-4 sm:px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
@@ -83,7 +88,10 @@ export default function AdminUsers() {
                 <tr><th>#</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Searches</th><th>Status</th><th>Joined</th><th>Actions</th></tr>
               </thead>
               <tbody>
-                {users.map((u, i) => (
+                {users.map((u, i) => {
+                  const isSelf = currentUser?.id === u._id;
+                  const disableDangerActions = isSelf || u.role === 'superadmin';
+                  return (
                   <tr key={u._id}>
                     <td className="text-gray-400 text-xs">{(page-1)*15+i+1}</td>
                     <td>
@@ -111,14 +119,15 @@ export default function AdminUsers() {
                     <td>
                       <div className="flex items-center gap-1.5">
                         <button onClick={() => openEdit(u)} className="px-2.5 py-1 text-xs font-semibold bg-gray-100 hover:bg-blue-100 hover:text-blue-700 rounded-lg transition-colors">Edit</button>
-                        <button onClick={() => handleToggle(u._id)} className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${u.isActive ? 'bg-red-50 hover:bg-red-100 text-red-600' : 'bg-green-50 hover:bg-green-100 text-green-600'}`}>
+                        <button disabled={disableDangerActions} onClick={() => handleToggle(u._id)} className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${u.isActive ? 'bg-red-50 hover:bg-red-100 text-red-600' : 'bg-green-50 hover:bg-green-100 text-green-600'}`}>
                           {u.isActive ? 'Disable' : 'Enable'}
                         </button>
-                        <button onClick={() => handleDelete(u._id)} className="px-2.5 py-1 text-xs font-semibold bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-colors">Del</button>
+                        <button disabled={disableDangerActions} onClick={() => handleDelete(u._id)} className="px-2.5 py-1 text-xs font-semibold bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed">Del</button>
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -169,11 +178,16 @@ export default function AdminUsers() {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1.5">Role</label>
-                  <select value={form.role} onChange={e => setForm({...form, role: e.target.value})}
-                    className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50">
-                    <option value="user">User</option>
-                    <option value="admin">Admin</option>
-                  </select>
+                  {canManageAdmins ? (
+                    <select value={form.role} onChange={e => setForm({...form, role: e.target.value})}
+                      className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50">
+                      <option value="user">User</option>
+                      <option value="admin">Admin</option>
+                      {editUser?.role === 'superadmin' ? <option value="superadmin">Super Admin</option> : null}
+                    </select>
+                  ) : (
+                    <input value="User" disabled className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-100 text-gray-500" />
+                  )}
                 </div>
               </div>
             </div>

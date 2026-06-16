@@ -7,16 +7,7 @@ const { protect } = require('../middleware/auth');
 const signToken = (id) => jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRE });
 
 router.post('/register', async (req, res) => {
-  try {
-    const { name, email, password, phone, cnic } = req.body;
-    const exists = await User.findOne({ email });
-    if (exists) return res.status(400).json({ success: false, message: 'Email already registered' });
-    const user = await User.create({ name, email, password, phone, cnic });
-    const token = signToken(user._id);
-    res.status(201).json({ success: true, token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
+  res.status(403).json({ success: false, message: 'Public registration is disabled. Contact your administrator.' });
 });
 
 router.post('/login', async (req, res) => {

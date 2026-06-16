@@ -57,7 +57,7 @@ export default function Sidebar({ isAdmin, open = false, onClose }: SidebarProps
           </div>
           <div className="flex-1">
             <p className="text-white font-bold text-sm leading-tight">Excise.Live</p>
-            <p className="text-cyan-200 text-xs">Pakistan Vehicle Excise</p>
+            <p className="text-cyan-200 text-xs">  Pakistan </p>
           </div>
           <button
             type="button"

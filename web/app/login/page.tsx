@@ -1,7 +1,6 @@
 'use client';
 import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import API from '@/lib/api';
 import { saveAuth } from '@/lib/auth';
 
@@ -18,7 +17,7 @@ export default function LoginPage() {
     try {
       const { data } = await API.post('/auth/login', form);
       saveAuth(data.token, data.user);
-      router.push(data.user.role === 'admin' ? '/admin' : '/dashboard');
+      router.push(data.user.role === 'admin' || data.user.role === 'superadmin' ? '/admin' : '/dashboard');
     } catch (err: any) {
       setError(err.response?.data?.message || 'Login failed. Please try again.');
     } finally {
@@ -61,8 +60,8 @@ export default function LoginPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
               </div>
-              <h2 className="text-2xl font-bold text-gray-900">Welcome Back</h2>
-              <p className="text-gray-500 text-sm mt-1">Sign in to your Excise.Live account</p>
+              <h2 className="text-2xl font-bold text-gray-900">Excise.Live</h2>
+              <p className="text-gray-500 text-sm mt-1">Sign in to your account</p>
             </div>
 
             {error && (
@@ -83,7 +82,7 @@ export default function LoginPage() {
                   value={form.email}
                   onChange={e => setForm({...form, email: e.target.value})}
                   className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-gray-900 placeholder-gray-400 bg-gray-50"
-                  placeholder="admin@excise.live"
+                  placeholder="Enter your email"
                 />
               </div>
               <div>
@@ -113,14 +112,7 @@ export default function LoginPage() {
             </form>
 
             <div className="mt-6 pt-5 border-t border-gray-100 text-center">
-              <p className="text-sm text-gray-500">
-                Don&apos;t have an account?{' '}
-                <Link href="/register" className="text-blue-600 font-semibold hover:underline">Create Account</Link>
-              </p>
-            </div>
-
-            <div className="mt-4 p-3 bg-blue-50 rounded-lg text-center">
-              <p className="text-xs text-blue-700 font-medium">Default Admin: admin@excise.live / Admin@123</p>
+              <p className="text-sm text-gray-500"> </p>
             </div>
           </div>
         </div>

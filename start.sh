@@ -39,10 +39,6 @@ echo "========================================="
 echo "  Services Running:"
 echo "  Frontend: http://localhost:3000"
 echo "  Backend:  http://localhost:5000"
-echo ""
-echo "  Default Admin:"
-echo "  Email:    admin@excise.live"
-echo "  Password: Admin@123"
 echo "========================================="
 
 wait

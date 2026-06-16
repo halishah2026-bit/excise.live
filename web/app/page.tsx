@@ -8,7 +8,7 @@ export default function Home() {
   useEffect(() => {
     if (isAuthenticated()) {
       const user = getUser();
-      router.replace(user?.role === 'admin' ? '/admin' : '/dashboard');
+      router.replace(user?.role === 'admin' || user?.role === 'superadmin' ? '/admin' : '/dashboard');
     } else {
       router.replace('/login');
     }
