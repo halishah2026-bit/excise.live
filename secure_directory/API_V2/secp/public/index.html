@@ -1,0 +1,274 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SECP Search Dashboard</title>
+
+<link rel="stylesheet"
+href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+
+<style>
+
+body{
+    font-family: Arial, sans-serif;
+    background:#f4f4f4;
+    margin:0;
+    padding:30px;
+}
+
+.container{
+    background:#fff;
+    padding:20px;
+    border-radius:10px;
+}
+
+textarea{
+    width:100%;
+    height:120px;
+    padding:10px;
+    margin-top:10px;
+}
+
+button{
+    margin-top:10px;
+    margin-right:10px;
+    padding:12px 20px;
+    border:none;
+    border-radius:5px;
+    cursor:pointer;
+    background:#0d6efd;
+    color:white;
+}
+
+table{
+    width:100%;
+    margin-top:20px;
+}
+
+#loading{
+    display:none;
+    margin-top:15px;
+    color:#0d6efd;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+<h2>SECP Search Dashboard</h2>
+
+<p>Paste CNIC/User IDs (one per line)</p>
+
+<textarea id="userIds"></textarea>
+
+<br>
+
+<input type="file" id="csvFile">
+
+<br>
+
+<button onclick="searchUsers()">
+Search Users
+</button>
+
+<button onclick="exportCSV()">
+Export CSV
+</button>
+
+<button onclick="exportExcel()">
+Export Excel
+</button>
+
+<div id="loading">
+Loading...
+</div>
+
+<table id="resultsTable" class="display">
+<thead>
+<tr id="tableHead"></tr>
+</thead>
+<tbody id="tableBody"></tbody>
+</table>
+
+</div>
+
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+
+<script>
+
+let globalRows = [];
+let dataTable = null;
+
+document.getElementById('csvFile').addEventListener('change', function(event){
+
+    const file = event.target.files[0];
+
+    if(!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = function(e){
+
+        const lines = e.target.result
+            .split(/\r?\n/)
+            .filter(Boolean);
+
+        document.getElementById('userIds').value = lines.join('\n');
+    };
+
+    reader.readAsText(file);
+});
+
+async function searchUsers(){
+
+    try{
+
+        $('#loading').show();
+
+        const raw = document.getElementById('userIds').value;
+
+        const userIds = raw
+            .split('\n')
+            .map(x => x.trim())
+            .filter(Boolean);
+
+        const response = await fetch('api/search-users',{
+
+            method:'POST',
+
+            headers:{
+                'Content-Type':'application/json'
+            },
+
+            body:JSON.stringify({
+                userIds
+            })
+        });
+
+        const result = await response.json();
+
+        $('#loading').hide();
+
+        if(!result.success){
+            alert(result.error || 'Search failed');
+            return;
+        }
+
+        globalRows = result.data || [];
+
+        renderTable(globalRows);
+
+    }catch(error){
+
+        $('#loading').hide();
+
+        alert(error.message);
+    }
+}
+
+function renderTable(rows){
+
+    if(!rows.length){
+        alert('No records found');
+        return;
+    }
+
+    const headers = Object.keys(rows[0]);
+
+    $('#tableHead').html(
+        headers.map(h => `<th>${h}</th>`).join('')
+    );
+
+    $('#tableBody').html(
+        rows.map(row => `
+            <tr>
+                ${headers.map(h => `<td>${row[h] ?? ''}</td>`).join('')}
+            </tr>
+        `).join('')
+    );
+
+    if(dataTable){
+        dataTable.destroy();
+    }
+
+    dataTable = $('#resultsTable').DataTable({
+        pageLength: 10
+    });
+}
+
+function exportCSV(){
+
+    if(!globalRows.length){
+        alert('No data available');
+        return;
+    }
+
+    const headers = Object.keys(globalRows[0]);
+
+    const csv = [
+        headers.join(','),
+        ...globalRows.map(row =>
+            headers.map(h => `"${row[h] ?? ''}"`).join(',')
+        )
+    ].join('\n');
+
+    const blob = new Blob([csv], { type:'text/csv' });
+
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+
+    a.href = url;
+    a.download = 'secp-users.csv';
+
+    a.click();
+
+    URL.revokeObjectURL(url);
+}
+
+async function exportExcel(){
+
+    if(!globalRows.length){
+        alert('No data available');
+        return;
+    }
+
+    const response = await fetch('api/export-excel',{
+
+        method:'POST',
+
+        headers:{
+            'Content-Type':'application/json'
+        },
+
+        body:JSON.stringify({
+            rows: globalRows
+        })
+    });
+
+    const blob = await response.blob();
+
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+
+    a.href = url;
+    a.download = 'secp-users.xlsx';
+
+    a.click();
+
+    URL.revokeObjectURL(url);
+}
+
+</script>
+
+</body>
+</html>
